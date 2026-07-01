@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ====== CSS Custom Properties (design tokens) ====== */
+:root {
+  --bg: #0a0a0c;
+  --bg-2: #111114;
+  --panel: #16161b;
+  --panel-2: #1c1c22;
+  --panel-3: #24242c;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-2: rgba(255, 255, 255, 0.10);
+  --border-3: rgba(255, 255, 255, 0.16);
+  --fg: #fafafa;
+  --fg-2: #e4e4e7;
+  --muted: #71717a;
+  --muted-2: #a1a1aa;
+  --accent: #ff2d6f;
+  --accent-2: #ff6b9d;
+  --accent-3: #8b5cf6;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+/* ====== Base ====== */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ====== Scrollbar ====== */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ====== Animation fill mode utilities ====== */
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out backwards;
+}
+
+/* ====== Text gradient clip ====== */
+.text-gradient {
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ====== Logo shimmer ====== */
+.logo-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.35), transparent 50%);
+  pointer-events: none;
+}
+
+/* ====== Sidebar active indicator ====== */
+.sidebar-active-indicator::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent-3));
+}
+
+/* ====== Progress step connectors ====== */
+.progress-step-done {
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+}
+.progress-step-active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  animation: pulseSoft 1.5s infinite;
+}
+
+/* ====== Blob backgrounds ====== */
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(140px);
+  pointer-events: none;
+}
+
+/* ====== Keyframes ====== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseSoft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ====== Drop zone drag state ====== */
+.dropzone-active {
+  border-color: rgba(255, 45, 111, 0.5) !important;
+  background: rgba(255, 45, 111, 0.04) !important;
+}
