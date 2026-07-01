@@ -46,30 +46,77 @@ export default function App() {
     return true;
   });
 
-  // Handlers
-  const handleUpload = useCallback(async (files) => {
-    if (!files || files.length === 0) return;
+  // Extract YouTube video ID from URL
+  const extractYoutubeId = (url) => {
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=)([^&]+)/,
+      /(?:youtu\.be\/)([^?&]+)/,
+      /(?:youtube\.com\/embed\/)([^?&]+)/,
+      /(?:youtube\.com\/shorts\/)([^?&]+)/,
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  };
+
+  // Derive a human-readable label from a URL
+  const getSourceLabel = (url, platform) => {
+    const platformLabels = {
+      youtube: 'YouTube',
+      tiktok: 'TikTok',
+      instagram: 'Instagram',
+      vimeo: 'Vimeo',
+      gdrive: 'Google Drive',
+      twitter: 'Twitter/X',
+      link: 'Link Eksternal',
+    };
+    return platformLabels[platform] || 'Link Eksternal';
+  };
+
+  // Handlers — unified submit (URL or file)
+  const handleSubmit = useCallback(async (payload) => {
+    if (!payload) return;
 
     setIsUploading(true);
     setUploadProgress(0);
 
+    let title, source, sourceLabel, caption;
+
+    if (payload.type === 'url') {
+      // URL mode
+      const videoId = extractYoutubeId(payload.url);
+      title = videoId
+        ? `Video YouTube — ${videoId.slice(0, 8)}...`
+        : `Video dari ${getSourceLabel(payload.url, payload.platform)}`;
+      source = payload.platform || 'link';
+      sourceLabel = getSourceLabel(payload.url, payload.platform);
+      caption = 'Sedang dianalisa...';
+    } else {
+      // File mode
+      title = payload.files[0]?.name?.replace(/\.[^/.]+$/, '') || 'Upload Baru';
+      source = 'local';
+      sourceLabel = 'Upload File';
+      caption = 'Sedang diproses...';
+    }
+
     // Simulate progress through steps
-    const stepDelay = 800; // ms per step for demo
+    const stepDelay = 800;
     for (let i = 1; i < processingSteps.length; i++) {
       await new Promise((r) => setTimeout(r, stepDelay));
       setUploadProgress(i);
     }
 
-    // Create a new clip entry for the uploaded file
     const newClip = {
       id: `clip-${Date.now()}`,
-      title: files[0].name.replace(/\.[^/.]+$/, ''),
+      title,
       duration: '0:00',
-      score: Math.floor(Math.random() * 30) + 65, // 65-94 range
+      score: Math.floor(Math.random() * 30) + 65,
       status: 'processing',
-      source: 'local',
-      sourceLabel: 'Upload Baru',
-      caption: 'Sedang diproses...',
+      source,
+      sourceLabel,
+      caption,
       thumbnail: `https://picsum.photos/seed/${Date.now()}/400/720.jpg`,
       hook: Math.floor(Math.random() * 30) + 65,
       trend: Math.floor(Math.random() * 30) + 60,
@@ -85,11 +132,13 @@ export default function App() {
     setIsUploading(false);
     setUploadProgress(-1);
 
-    // Mark clip as ready after "processing"
+    // Mark clip as ready after processing delay (simulate AI analysis)
     setTimeout(() => {
       setClips((prev) =>
         prev.map((c) =>
-          c.id === newClip.id ? { ...c, status: 'ready', duration: '0:42' } : c
+          c.id === newClip.id
+            ? { ...c, status: 'ready', duration: '0:42', caption: 'Klip siap!' }
+            : c
         )
       );
     }, 2000);
@@ -167,9 +216,9 @@ export default function App() {
 
               {/* Hero input */}
               <HeroInput
-                subtitle="Upload file video Anda. AI akan menemukan momen terbaik dan membuat klip siap posting dalam hitungan menit."
+                subtitle="Tempel link YouTube, TikTok, Instagram, Vimeo, atau upload file video. AI akan menemukan momen terbaik dan membuat klip siap posting."
                 features={defaultFeatures}
-                onUpload={handleUpload}
+                onSubmit={handleSubmit}
                 isUploading={isUploading}
               />
 
