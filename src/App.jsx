@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import BlobBackground from './components/BlobBackground';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -7,6 +7,12 @@ import StatsBanner from './components/StatsBanner';
 import ClipGrid from './components/ClipGrid';
 import FilterChips from './components/FilterChips';
 import ProgressIndicator from './components/ProgressIndicator';
+import {
+  uploadVideoFile,
+  uploadVideoUrl,
+  pollJobStatus,
+  downloadClip,
+} from './lib/api';
 import {
   sampleClips,
   defaultStats,
@@ -24,16 +30,19 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(-1);
+  const [progressMessage, setProgressMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState(null);
   const [clips, setClips] = useState(sampleClips);
+
+  // Ref for abort & cleanup
+  const activeJobRef = useRef(null); // { jobId, abort: () => void }
 
   // Derived: filtered clips
   const filteredClips = clips.filter((clip) => {
-    // Filter by status
     if (activeFilter === 'viral' && clip.score < 85) return false;
     if (activeFilter === 'processing' && clip.status !== 'processing') return false;
     if (activeFilter === 'draft' && clip.status !== 'draft') return false;
 
-    // Filter by search
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
@@ -42,106 +51,85 @@ export default function App() {
         clip.caption.toLowerCase().includes(q)
       );
     }
-
     return true;
   });
 
-  // Extract YouTube video ID from URL
-  const extractYoutubeId = (url) => {
-    const patterns = [
-      /(?:youtube\.com\/watch\?v=)([^&]+)/,
-      /(?:youtu\.be\/)([^?&]+)/,
-      /(?:youtube\.com\/embed\/)([^?&]+)/,
-      /(?:youtube\.com\/shorts\/)([^?&]+)/,
-    ];
-    for (const p of patterns) {
-      const m = url.match(p);
-      if (m) return m[1];
-    }
-    return null;
-  };
+  // ──── Handlers — connected to real backend ────
 
-  // Derive a human-readable label from a URL
-  const getSourceLabel = (url, platform) => {
-    const platformLabels = {
-      youtube: 'YouTube',
-      tiktok: 'TikTok',
-      instagram: 'Instagram',
-      vimeo: 'Vimeo',
-      gdrive: 'Google Drive',
-      twitter: 'Twitter/X',
-      link: 'Link Eksternal',
-    };
-    return platformLabels[platform] || 'Link Eksternal';
-  };
-
-  // Handlers — unified submit (URL or file)
+  /**
+   * Unified submit (URL or file) → POST /api/upload → poll /api/status/:jobId
+   * Backend response { currentStep, status, progress, clips, error } maps directly:
+   *   currentStep → ProgressIndicator (matches processingSteps[0..5])
+   *   clips → ClipGrid (matches Clip type exactly, no transform needed)
+   */
   const handleSubmit = useCallback(async (payload) => {
     if (!payload) return;
 
+    // Abort any existing job
+    if (activeJobRef.current) {
+      activeJobRef.current.abort();
+      activeJobRef.current = null;
+    }
+
     setIsUploading(true);
     setUploadProgress(0);
+    setProgressMessage('Mengupload video...');
+    setErrorMessage(null);
 
-    let title, source, sourceLabel, caption;
-
-    if (payload.type === 'url') {
-      // URL mode
-      const videoId = extractYoutubeId(payload.url);
-      title = videoId
-        ? `Video YouTube — ${videoId.slice(0, 8)}...`
-        : `Video dari ${getSourceLabel(payload.url, payload.platform)}`;
-      source = payload.platform || 'link';
-      sourceLabel = getSourceLabel(payload.url, payload.platform);
-      caption = 'Sedang dianalisa...';
-    } else {
-      // File mode
-      title = payload.files[0]?.name?.replace(/\.[^/.]+$/, '') || 'Upload Baru';
-      source = 'local';
-      sourceLabel = 'Upload File';
-      caption = 'Sedang diproses...';
-    }
-
-    // Simulate progress through steps
-    const stepDelay = 800;
-    for (let i = 1; i < processingSteps.length; i++) {
-      await new Promise((r) => setTimeout(r, stepDelay));
-      setUploadProgress(i);
-    }
-
-    const newClip = {
-      id: `clip-${Date.now()}`,
-      title,
-      duration: '0:00',
-      score: Math.floor(Math.random() * 30) + 65,
-      status: 'processing',
-      source,
-      sourceLabel,
-      caption,
-      thumbnail: `https://picsum.photos/seed/${Date.now()}/400/720.jpg`,
-      hook: Math.floor(Math.random() * 30) + 65,
-      trend: Math.floor(Math.random() * 30) + 60,
-      visual: Math.floor(Math.random() * 30) + 60,
-      audio: Math.floor(Math.random() * 30) + 65,
-      aspectRatio: '9:16',
+    let aborted = false;
+    activeJobRef.current = {
+      jobId: null,
+      abort: () => { aborted = true; },
     };
 
-    setClips((prev) => [newClip, ...prev]);
+    try {
+      // 1. Submit to backend
+      let result;
+      if (payload.type === 'url') {
+        result = await uploadVideoUrl(payload.url, payload.platform);
+      } else {
+        result = await uploadVideoFile(payload.files[0]);
+      }
 
-    // Simulate final processing
-    await new Promise((r) => setTimeout(r, 1500));
-    setIsUploading(false);
-    setUploadProgress(-1);
+      if (aborted) return;
+      activeJobRef.current.jobId = result.jobId;
 
-    // Mark clip as ready after processing delay (simulate AI analysis)
-    setTimeout(() => {
-      setClips((prev) =>
-        prev.map((c) =>
-          c.id === newClip.id
-            ? { ...c, status: 'ready', duration: '0:42', caption: 'Klip siap!' }
-            : c
-        )
+      // 2. Poll status — response shape matches ProgressIndicator + ClipGrid directly
+      await pollJobStatus(
+        result.jobId,
+        (data) => {
+          if (aborted) return;
+          setUploadProgress(data.currentStep);
+          setProgressMessage(data.progress || '');
+        },
+        2000
       );
-    }, 2000);
+
+      if (aborted) return;
+
+      // 3. Get final clips
+      const finalStatus = await (
+        await fetch(
+          `${import.meta.env.VITE_API_BASE || 'http://localhost:4000/api'}/status/${result.jobId}`
+        )
+      ).json();
+
+      if (finalStatus.clips && finalStatus.clips.length > 0) {
+        setClips((prev) => [...finalStatus.clips, ...prev]);
+      }
+
+      setIsUploading(false);
+      setUploadProgress(-1);
+      setProgressMessage('');
+      activeJobRef.current = null;
+    } catch (err) {
+      if (aborted) return;
+      setIsUploading(false);
+      setUploadProgress(-1);
+      setProgressMessage('');
+      setErrorMessage(err.message || 'Gagal memproses video. Coba lagi.');
+      activeJobRef.current = null;
+    }
   }, []);
 
   const handleClipClick = useCallback((clip) => {
@@ -152,18 +140,23 @@ export default function App() {
     console.log('Preview clip:', clip);
   }, []);
 
-  const handleClipDownload = useCallback((clip) => {
-    console.log('Download clip:', clip);
+  /**
+   * Download clip — triggers browser download via backend stream
+   */
+  const handleClipDownload = useCallback(async (clip) => {
+    try {
+      await downloadClip(clip.id);
+    } catch (err) {
+      setErrorMessage(err.message || 'Gagal download klip.');
+      setTimeout(() => setErrorMessage(null), 5000);
+    }
   }, []);
 
   return (
     <div className="h-full">
-      {/* Decorative blobs */}
       <BlobBackground />
 
-      {/* App layout: sidebar + main */}
       <div className="relative z-[2] grid h-full" style={{ gridTemplateColumns: '72px 1fr' }}>
-        {/* ====== SIDEBAR ====== */}
         <Sidebar
           navItems={defaultNavItems}
           bottomItems={defaultBottomNavItems}
@@ -172,9 +165,7 @@ export default function App() {
           userInitials="RA"
         />
 
-        {/* ====== MAIN ====== */}
         <div className="flex flex-col overflow-hidden min-w-0">
-          {/* Top bar */}
           <TopBar
             credits={840}
             notificationCount={3}
@@ -196,16 +187,35 @@ export default function App() {
             </div>
           </TopBar>
 
-          {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto custom-scrollbar px-7 py-8 pb-[60px] scroll-smooth">
             <div className="max-w-[1280px] mx-auto">
+              {/* Error banner */}
+              {errorMessage && (
+                <div className="mb-4 p-4 rounded-xl bg-clip-danger/10 border border-clip-danger/30 animate-scale-in">
+                  <div className="flex items-start gap-3">
+                    <svg className="flex-shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round">
+                      <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    <div>
+                      <p className="text-sm font-medium text-clip-danger">{errorMessage}</p>
+                      <button
+                        onClick={() => setErrorMessage(null)}
+                        className="text-xs text-clip-muted-2 hover:text-clip-fg mt-1 transition-colors"
+                      >
+                        Tutup
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Progress indicator (visible during upload) */}
               {(isUploading || uploadProgress >= 0) && (
                 <div className="mb-7 p-5 rounded-2xl bg-clip-panel border border-clip-border animate-scale-in">
                   <p className="text-sm font-medium text-clip-muted-2 mb-4">
-                    {uploadProgress < processingSteps.length - 1
+                    {progressMessage || (uploadProgress < processingSteps.length - 1
                       ? 'Memproses video...'
-                      : 'Hampir selesai...'}
+                      : 'Hampir selesai...')}
                   </p>
                   <ProgressIndicator
                     steps={processingSteps}
@@ -214,7 +224,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Hero input */}
               <HeroInput
                 subtitle="Tempel link YouTube, TikTok, Instagram, Vimeo, atau upload file video. AI akan menemukan momen terbaik dan membuat klip siap posting."
                 features={defaultFeatures}
@@ -222,10 +231,8 @@ export default function App() {
                 isUploading={isUploading}
               />
 
-              {/* Stats banner */}
               <StatsBanner stats={defaultStats} />
 
-              {/* Section: Recent clips */}
               <div className="flex items-center justify-between mb-5 mt-2">
                 <h2 className="font-display text-xl font-bold tracking-[-0.02em] flex items-center gap-2.5">
                   Klip Terbaru
@@ -250,7 +257,6 @@ export default function App() {
                 />
               </div>
 
-              {/* Clips grid */}
               <ClipGrid
                 clips={filteredClips}
                 onClipClick={handleClipClick}
